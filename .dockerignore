@@ -1,0 +1,13 @@
+# Generic ignores
+.dockerignore
+copy_with_deps.bash
+tinykerb.tar
+Makefile
+Containerfile
+usr.bin.tup
+guts/
+denials.txt
+# Specific ignores
+/usr/share/doc/
+/usr/share/man/
+/usr/share/info/

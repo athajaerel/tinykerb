@@ -1,0 +1,10 @@
+bin/
+denials.txt
+etc/
+guts/
+lib/
+lib64
+sbin
+tinykerb.tar
+usr.bin.tup
+usr/
