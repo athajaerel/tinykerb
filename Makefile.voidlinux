@@ -1,0 +1,13 @@
+list_cmd:=/usr/bin/xls
+pkgs:=mit-krb5 mit-krb5-client mit-krb5-libs
+temp_pkgs:=coreutils bash expect tcl botan sqlite iproute2 sed findutils
+
+id_kdc:=localhost/tinykerb-kdc-voidlinux:latest
+id_kadmind:=localhost/tinykerb-kadmind-voidlinux:latest
+
+.PHONY: post_deps
+post_deps:
+	ln -s libsqlite3.so.0.8.6 lib/libsqlite3.so.0
+	ln -s gfind bin/find
+
+include *.mk

@@ -1,0 +1,2 @@
+EXPOSE 10088/tcp 10088/udp
+ENTRYPOINT ["/usr/sbin/krb5kdc", "-n"]

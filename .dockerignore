@@ -1,13 +1,20 @@
 # Generic ignores
-.dockerignore
-copy_with_deps.bash
-tinykerb.tar
-Makefile
-Containerfile
-usr.bin.tup
+*.bash
+*.tar
+common.mk
+bin/bin
+/etc/sv/
 guts/
-denials.txt
-# Specific ignores
+.git/
+.gitignore
+.gitmodules
+lib/lib
+lib/systemd
+Makefile*
+src/
 /usr/share/doc/
+/usr/share/examples/
 /usr/share/man/
 /usr/share/info/
+
+# Dynamic ignores
