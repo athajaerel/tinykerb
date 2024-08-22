@@ -1,0 +1,4 @@
+spawn /usr/bin/kinit -c $env(CCFILE) -S $env(KADM_PRINC) $env(USER_ADMIN)@$env(REALM)
+expect "Password for $env(USER_ADMIN)@$env(REALM): "
+send -- "$env(PW_ADMIN)\r"
+expect eof

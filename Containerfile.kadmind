@@ -1,0 +1,2 @@
+EXPOSE 10749/tcp 10749/udp
+ENTRYPOINT ["/usr/sbin/kadmind", "-nofork"]
