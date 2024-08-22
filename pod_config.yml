@@ -1,0 +1,106 @@
+# Kubernetes pod config
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: krb5
+data:
+  krb5.conf: |
+    [logging]
+      default = STDERR
+      kdc = STDERR
+      admin_server = STDERR
+    [libdefaults]
+      default_realm = K3S.LAB
+      dns_lookup_realm = false
+      dns_lookup_kdc = true
+      rdns = false
+      ticket_lifetime = 24h
+      forwardable = true
+      udp_preference_limit = 0
+      default_ccache_name = FILE:/var/tmp/krb5cc_%{uid}                         
+    [realms]
+      K3S.LAB = {
+        kdc = localhost:10088
+        master_kdc = localhost:10088
+        admin_server = localhost:10749
+        default_domain = k3s.lab
+        #kpasswd_server = localhost:464
+      }
+    [domain_realm]
+      .k3s.lab = K3S.LAB
+      k3s.lab = K3S.LAB
+  kadm5.acl: |
+    god@k3s.lab		*
+    */wizards@k3s.lab	*
+  kdc.conf: |
+    [kdcdefaults]
+      kdc_ports = 10088
+    [realms]
+      K3S.LAB = {
+        database_name = /var/krb5kdc/principal
+        admin_keytab = FILE:/var/krb5kdc/kadm5.keytab
+        acl_file = /var/krb5kdc/kadm5.acl
+        key_stash_file = /etc/krb5kdc/stash
+        kdc_ports = 10088
+        max_life = 10h 0m 0s
+        max_renewable_life = 7d 0h 0m 0s
+        #master_key_type = aes256-cts
+        #supported_enctypes = aes256-cts:normal aes128-cts:normal
+        default_principal_flags = +preauth
+        pkinit_anchors = FILE:/etc/tls/ca.crt
+        pkinit_identity = FILE:/etc/tls/kdc.crt,/etc/tls/kdc.key
+        allow_pkinit = yes
+        module = pkinit:/usr/lib64/x86_64-linux-gnu/krb5/plugins/preauth/pkinit.so
+      }
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tinykerb-pod
+spec:
+  restartPolicy: Never
+  volumes:
+  - name: shared-data
+    emptyDir: {}
+  - name: krb5-conf
+    configMap:
+      name: krb5
+      items:
+      - key: krb5.conf
+        path: krb5.conf
+  - name: kdc-conf
+    configMap:
+      name: krb5
+      items:
+      - key: kdc.conf
+        path: kdc.conf
+  - name: kadm5-acl
+    configMap:
+      name: krb5
+      items:
+      - key: kadm5.acl
+        path: kadm5.acl
+  containers:
+  - name: tinykerb-kdc-container
+    image: tinykerb-kdc
+    volumeMounts:
+    - name: shared-data
+      mountPath: /var/krb5kdc
+    - name: krb5-conf
+      mountPath: /etc
+    - name: kdc-conf
+      mountPath: /etc/krb5kdc
+    - name: kadm5-acl
+      mountPath: /var/krb5kdc
+  - name: tinykerb-kadmind-container
+    image: tinykerb-kadmind
+    volumeMounts:
+    - name: shared-data
+      mountPath: /var/krb5kdc
+    - name: krb5-conf
+      mountPath: /etc
+    - name: kdc-conf
+      mountPath: /etc/krb5kdc
+    - name: kadm5-acl
+      mountPath: /var/krb5kdc
