@@ -1,9 +1,46 @@
-# Kubernetes pod config
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kerberos-system
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    cert-manager.io/cluster-issuer: k3s-amethyst-issuer
+  name: krb5kdc-service
+  namespace: kerberos-system
+spec:
+  ports:
+  - name: krb5kdc-tcp
+    port: 88
+    protocol: TCP
+    targetPort: 10088
+  - name: krb5kdc-udp
+    port: 88
+    protocol: UDP
+    targetPort: 10088
+  type: ClusterIP
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kerberos-certificate
+  namespace: kerberos-system
+spec:
+  secretName: kerberos-tls
+  dnsNames:
+    - "kerberos.k3s.lab"
+  issuerRef:
+    name: k3s-amethyst-issuer
+    kind: ClusterIssuer
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: krb5
+  namespace: kerberos-system
 data:
   krb5.conf: |
     [logging]
@@ -18,21 +55,23 @@ data:
       ticket_lifetime = 24h
       forwardable = true
       udp_preference_limit = 0
-      default_ccache_name = FILE:/var/tmp/krb5cc_%{uid}                         
+      default_ccache_name = FILE:/var/tmp/krb5cc_%{uid} 
     [realms]
       K3S.LAB = {
         kdc = localhost:10088
         master_kdc = localhost:10088
         admin_server = localhost:10749
         default_domain = k3s.lab
-        #kpasswd_server = localhost:464
+        #kpasswd_server = localhost:10464
       }
     [domain_realm]
       .k3s.lab = K3S.LAB
       k3s.lab = K3S.LAB
   kadm5.acl: |
     god@k3s.lab		*
-    */wizards@k3s.lab	*
+    */wizard@k3s.lab	*
+    */witch@k3s.lab	*
+    */mage@k3s.lab	*
   kdc.conf: |
     [kdcdefaults]
       kdc_ports = 10088
@@ -40,7 +79,7 @@ data:
       K3S.LAB = {
         database_name = /var/krb5kdc/principal
         admin_keytab = FILE:/var/krb5kdc/kadm5.keytab
-        acl_file = /var/krb5kdc/kadm5.acl
+        acl_file = /var/kadm5.acl
         key_stash_file = /etc/krb5kdc/stash
         kdc_ports = 10088
         max_life = 10h 0m 0s
@@ -49,20 +88,32 @@ data:
         #supported_enctypes = aes256-cts:normal aes128-cts:normal
         default_principal_flags = +preauth
         pkinit_anchors = FILE:/etc/tls/ca.crt
-        pkinit_identity = FILE:/etc/tls/kdc.crt,/etc/tls/kdc.key
+        pkinit_identity = FILE:/etc/tls/tls.crt,/etc/tls/tls.key
         allow_pkinit = yes
         module = pkinit:/usr/lib64/x86_64-linux-gnu/krb5/plugins/preauth/pkinit.so
       }
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kerberos-database-pvc
+  namespace: kerberos-system
+spec:
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: v1
 kind: Pod
 metadata:
   name: tinykerb-pod
+  namespace: kerberos-system
 spec:
-  restartPolicy: Never
+  restartPolicy: Always
   volumes:
-  - name: shared-data
-    emptyDir: {}
   - name: krb5-conf
     configMap:
       name: krb5
@@ -81,26 +132,41 @@ spec:
       items:
       - key: kadm5.acl
         path: kadm5.acl
+  - name: tls-certs-secret
+    secret:
+      secretName: kerberos-tls
+  - name: database-pvc
+    persistentVolumeClaim:
+      claimName: kerberos-database-pvc
   containers:
   - name: tinykerb-kdc-container
-    image: tinykerb-kdc
+    image: localhost/tinykerb-kdc
+    imagePullPolicy: Never
     volumeMounts:
-    - name: shared-data
-      mountPath: /var/krb5kdc
     - name: krb5-conf
       mountPath: /etc
+      readOnly: true
     - name: kdc-conf
       mountPath: /etc/krb5kdc
+      readOnly: true
     - name: kadm5-acl
+      mountPath: /var
+      readOnly: true
+    - name: tls-certs-secret
+      mountPath: /etc/tls
+      readOnly: true
+    - name: database-pvc
       mountPath: /var/krb5kdc
-  - name: tinykerb-kadmind-container
-    image: tinykerb-kadmind
-    volumeMounts:
-    - name: shared-data
-      mountPath: /var/krb5kdc
-    - name: krb5-conf
-      mountPath: /etc
-    - name: kdc-conf
-      mountPath: /etc/krb5kdc
-    - name: kadm5-acl
-      mountPath: /var/krb5kdc
+      readOnly: false
+#  - name: tinykerb-kadmind-container
+#    image: tinykerb-kadmind
+#    imagePullPolicy: IfNotPresent
+#    volumeMounts:
+#    - name: shared-data
+#      mountPath: /var/krb5kdc
+#    - name: krb5-conf
+#      mountPath: /etc
+#    - name: kdc-conf
+#      mountPath: /etc/krb5kdc
+#    - name: kadm5-acl
+#      mountPath: /var/krb5kdc
