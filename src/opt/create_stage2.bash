@@ -65,6 +65,7 @@ cat <<EOF >/opt/nominated.txt
 /etc/tls/kdc.key
 /etc/tls/kdc.crt
 /bin/bash
+/usr/bin/dd
 /lib/x86_64-linux-gnu/libtinfo.so.6
 /lib/x86_64-linux-gnu/libtinfo.so.6.4
 /lib/x86_64-linux-gnu/libc.so.6

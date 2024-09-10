@@ -1,0 +1,256 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kerberos-system
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kerberos-admin-passwords
+  namespace: kerberos-system
+type: Opaque
+data:
+  PW_MASTER: d2liYmxlCg==
+  PW_ADMIN: d2liYmxlCg==
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: krb5kdc-service
+  namespace: kerberos-system
+spec:
+  ports:
+  - name: krb5kdc-tcp
+    port: 88
+    protocol: TCP
+    targetPort: 10088
+  - name: krb5kdc-udp
+    port: 88
+    protocol: UDP
+    targetPort: 10088
+  type: ClusterIP
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kerberos-certificate
+  namespace: kerberos-system
+spec:
+  secretName: kerberos-tls
+  dnsNames:
+    - "kerberos.k3s.lab"
+# detect issuer? not possible, so this must be scripted
+# can we patch in the issuer later?
+  issuerRef:
+    name: k3s-amethyst-issuer
+    kind: ClusterIssuer
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kerberos-env
+  namespace: kerberos-system
+data:
+  KRB5_CONFIG: /etc/krb5kdc/krb5.conf
+  KRB5_KTNAME: /var/krb5kdc/kadm5.keytab
+  KRB5_STASH: /etc/krb5kdc/stash
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kerberos-init-env
+  namespace: kerberos-system
+data:
+  REALM: K3S.LAB
+  KCHP_PRINC: kadmin/changepw@${REALM}
+  KADM_PRINC: kadmin/admin@${REALM}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: krb5
+  namespace: kerberos-system
+data:
+  krb5.conf: |
+    [logging]
+      default = STDERR
+      kdc = STDERR
+      admin_server = STDERR
+    [libdefaults]
+      default_realm = K3S.LAB
+      dns_lookup_realm = false
+      dns_lookup_kdc = true
+      rdns = false
+      ticket_lifetime = 24h
+      forwardable = true
+      udp_preference_limit = 0
+      default_ccache_name = FILE:/var/tmp/krb5cc_%{uid} 
+    [realms]
+      K3S.LAB = {
+        kdc = localhost:10088
+        master_kdc = localhost:10088
+        admin_server = localhost:10749
+        default_domain = k3s.lab
+        #kpasswd_server = localhost:10464
+      }
+    [domain_realm]
+      .k3s.lab = K3S.LAB
+      k3s.lab = K3S.LAB
+    [kdcdefaults]
+      kdc_ports = 10088
+    [realms]
+      K3S.LAB = {
+        kdc = localhost:10088
+        master_kdc = localhost:10088
+        admin_server = localhost:10749
+        default_domain = k3s.lab
+        #kpasswd_server = localhost:10464
+        database_name = /var/krb5kdc/principal
+        admin_keytab = FILE:/var/krb5kdc/kadm5.keytab
+        acl_file = /var/kadm5.acl
+        key_stash_file = /etc/krb5kdc/stash
+        kdc_ports = 10088
+        max_life = 10h 0m 0s
+        max_renewable_life = 7d 0h 0m 0s
+        #master_key_type = aes256-cts
+        #supported_enctypes = aes256-cts:normal aes128-cts:normal
+        default_principal_flags = +preauth
+        pkinit_anchors = FILE:/etc/tls/ca.crt
+        pkinit_identity = FILE:/etc/tls/tls.crt,/etc/tls/tls.key
+        allow_pkinit = yes
+        module = pkinit:/usr/lib64/x86_64-linux-gnu/krb5/plugins/preauth/pkinit.so
+      }
+  kadm5.acl: |
+    god@k3s.lab		*
+    */wizard@k3s.lab	*
+    */witch@k3s.lab	*
+    */mage@k3s.lab	*
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kerberos-database-pvc
+  namespace: kerberos-system
+spec:
+  storageClassName: longhorn
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 500Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tinykerb-pod
+  namespace: kerberos-system
+spec:
+  restartPolicy: Always
+  volumes:
+  - name: krb5-conf
+    configMap:
+      name: krb5
+      items:
+      - key: krb5.conf
+        path: krb5.conf
+#  - name: kdc-conf
+#    configMap:
+#      name: krb5
+#      items:
+#      - key: kdc.conf
+#        path: kdc.conf
+  - name: kadm5-acl
+    configMap:
+      name: krb5
+      items:
+      - key: kadm5.acl
+        path: kadm5.acl
+  - name: tls-certs-secret
+    secret:
+      secretName: kerberos-tls
+  - name: database-pvc
+    persistentVolumeClaim:
+      claimName: kerberos-database-pvc
+  initContainers:
+  - name: tinykerb-init-1
+    image: localhost/tinykerb-kdc
+    imagePullPolicy: Never
+    envFrom:
+    - configMapRef:
+        name: kerberos-env
+    - configMapRef:
+        name: kerberos-init-env
+    - secretRef:
+        name: kerberos-admin-passwords
+    volumeMounts:
+    - name: krb5-conf
+      mountPath: /etc/krb5kdc
+      readOnly: true
+    - name: database-pvc
+      mountPath: /var/krb5kdc
+      readOnly: false
+    command:
+    - 'bash'
+    - '-c'
+    - '[ -e /var/krb5kdc/principal ] || kdb5_util create -r ${REALM} -s -sf ${KRB5_STASH} -P ${PW_MASTER}'
+#  - name: tinykerb-init-2
+#    image: localhost/tinykerb-kdc
+#    imagePullPolicy: Never
+#    envFrom:
+#    - configMapRef:
+#        name: kerberos-env
+#    - configMapRef:
+#        name: kerberos-init-env
+#    - secretRef:
+#        name: kerberos-admin-passwords
+#    volumeMounts:
+#    - name: krb5-conf
+#      mountPath: /etc/krb5kdc
+#      readOnly: true
+#    - name: database-pvc
+#      mountPath: /var/krb5kdc
+#      readOnly: false
+#    command:
+#    - 'bash'
+#    - '-c'
+#    - '[ -e ${KRB5_STASH} ] || kdb5_util stash -f ${KRB5_STASH}'
+#'kadmin.local -p ${KADM_PRINC} ktadd -k ${KRB5_KTNAME}'
+  containers:
+  - name: tinykerb-kdc-container
+    image: localhost/tinykerb-kdc
+    imagePullPolicy: Never
+    envFrom:
+    - configMapRef:
+        name: kerberos-env
+    volumeMounts:
+    - name: krb5-conf
+      mountPath: /etc/krb5kdc
+      readOnly: true
+#    - name: kdc-conf
+#      mountPath: /etc/krb5kdc
+#      readOnly: true
+    - name: kadm5-acl
+      mountPath: /var
+      readOnly: true
+    - name: tls-certs-secret
+      mountPath: /etc/tls
+      readOnly: true
+    - name: database-pvc
+      mountPath: /var/krb5kdc
+      readOnly: false
+#  - name: tinykerb-kadmind-container
+#    image: tinykerb-kadmind
+#    imagePullPolicy: IfNotPresent
+#    envFrom:
+#    - configMapRef:
+#        name: kerberos-env
+#    volumeMounts:
+#    - name: shared-data
+#      mountPath: /var/krb5kdc
+#    - name: krb5-conf
+#      mountPath: /etc
+#    - name: kdc-conf
+#      mountPath: /etc/krb5kdc
+#    - name: kadm5-acl
+#      mountPath: /var/krb5kdc
